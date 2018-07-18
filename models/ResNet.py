@@ -207,8 +207,12 @@ class MUB(nn.Module):
         # cropped feature
         cp_h = int(x.size(2)/2)
         cp_w = int(x.size(3)/2)
-        start_h = random.randint(0, cp_h) 
-        start_w = random.randint(0, cp_w)
+        if self.training:
+            start_h = random.randint(0, cp_h) 
+            start_w = random.randint(0, cp_w)
+        else:
+            start_h = int(x.size(2)/4)
+            start_w = int(x.size(3)/4)
         x_cp = x[:,:,start_h:start_h + cp_h, start_w:start_w+cp_w]
         x_cp = F.avg_pool2d(x_cp, x_cp.size()[2:])
         f_cp = x_cp.view(x_cp.size(0), -1)

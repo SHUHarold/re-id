@@ -71,6 +71,8 @@ parser.add_argument('--eval-step', type=int, default=-1,
                     help="run evaluation for every N epochs (set to -1 to test after training)")
 parser.add_argument('--start-eval', type=int, default=0, help="start to evaluate after specific epoch")
 parser.add_argument('--save-dir', type=str, default='log')
+parser.add_argument('--train-log', type=str, default='log_train.txt')
+parser.add_argument('--test-log', type=str, default='log_test.txt')
 parser.add_argument('--use-cpu', action='store_true', help="use cpu")
 parser.add_argument('--gpu-devices', default='0', type=str, help='gpu device ids for CUDA_VISIBLE_DEVICES')
 
@@ -83,9 +85,9 @@ def main():
     if args.use_cpu: use_gpu = False
 
     if not args.evaluate:
-        sys.stdout = Logger(osp.join(args.save_dir, 'log_train.txt'))
+        sys.stdout = Logger(osp.join(args.save_dir, args.train_log))
     else:
-        sys.stdout = Logger(osp.join(args.save_dir, 'log_test.txt'))
+        sys.stdout = Logger(osp.join(args.save_dir, args.test_log))
     print("==========\nArgs:{}\n==========".format(args))
 
     if use_gpu:
@@ -229,7 +231,7 @@ def train(epoch, model, criterion, optimizer, trainloader, use_gpu):
 
         # else:
         #     loss = criterion(outputs, pids)
-        loss = loss_g + loss_cp + loss_p
+        loss = loss_g + loss_cp + loss_p/num_part
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
