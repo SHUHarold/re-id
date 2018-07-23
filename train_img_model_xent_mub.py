@@ -19,7 +19,7 @@ import data_manager
 from dataset_loader import ImageDataset
 import transforms as T
 import models
-from losses import CrossEntropyLabelSmooth, DeepSupervision
+from losses import CrossEntropyLabelSmooth, DeepSupervision, ContrastiveLoss
 from utils import AverageMeter, Logger, save_checkpoint
 from eval_metrics import evaluate
 from optimizers import init_optim
@@ -75,6 +75,7 @@ parser.add_argument('--train-log', type=str, default='log_train.txt')
 parser.add_argument('--test-log', type=str, default='log_test.txt')
 parser.add_argument('--use-cpu', action='store_true', help="use cpu")
 parser.add_argument('--gpu-devices', default='0', type=str, help='gpu device ids for CUDA_VISIBLE_DEVICES')
+parser.add_argument('--use-contraloss', action='store_true', help="use contrasive loss")
 
 args = parser.parse_args()
 
@@ -137,7 +138,7 @@ def main():
     )
 
     print("Initializing model: {}".format(args.arch))
-    model = models.init_model(name=args.arch, num_classes=dataset.num_train_pids, loss={'xent'}, use_gpu=use_gpu)
+    model = models.init_model(name=args.arch, num_classes=dataset.num_train_pids, loss={'xent'}, use_contraloss=args.use_contraloss, use_gpu=use_gpu)
     print("Model size: {:.5f}M".format(sum(p.numel() for p in model.parameters())/1000000.0))
 
     criterion = CrossEntropyLabelSmooth(num_classes=dataset.num_train_pids, use_gpu=use_gpu)
@@ -168,7 +169,7 @@ def main():
 
     for epoch in range(start_epoch, args.max_epoch):
         start_train_time = time.time()
-        train(epoch, model, criterion, optimizer, trainloader, use_gpu)
+        train(epoch, model, criterion, optimizer, trainloader, args.use_contraloss, use_gpu)
         train_time += round(time.time() - start_train_time)
         
         if args.stepsize > 0: scheduler.step()
@@ -198,7 +199,7 @@ def main():
     train_time = str(datetime.timedelta(seconds=train_time))
     print("Finished. Total elapsed time (h:m:s): {}. Training time (h:m:s): {}.".format(elapsed, train_time))
 
-def train(epoch, model, criterion, optimizer, trainloader, use_gpu):
+def train(epoch, model, criterion, optimizer, trainloader, use_contraloss, use_gpu):
     losses = AverageMeter()
     batch_time = AverageMeter()
     data_time = AverageMeter()
@@ -213,7 +214,12 @@ def train(epoch, model, criterion, optimizer, trainloader, use_gpu):
         # measure data loading time
         data_time.update(time.time() - end)
         
-        y_g, y_cp, y_p = model(imgs)
+        if use_contraloss:
+            contrastiveloss = ContrastiveLoss()
+            y_g, y_cp, y_p, f_g, f_cp = model(imgs)
+            loss_contra = contrastiveloss(f_g, f_cp, 1)
+        else:
+            y_g, y_cp, y_p = model(imgs)
         loss_g = criterion(y_g, pids)
         loss_cp = criterion(y_cp, pids)
         part = {}
@@ -231,7 +237,10 @@ def train(epoch, model, criterion, optimizer, trainloader, use_gpu):
 
         # else:
         #     loss = criterion(outputs, pids)
-        loss = loss_g + loss_cp + loss_p/num_part
+        if use_contraloss:
+            loss = loss_g + loss_cp + loss_p/num_part + loss_contra
+        else:    
+            loss = loss_g + loss_cp + loss_p/num_part
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()

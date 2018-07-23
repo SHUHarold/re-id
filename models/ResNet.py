@@ -173,13 +173,15 @@ class MUB(nn.Module):
     """
     ResNet50 + Multi-branch
     """
-    def __init__(self, num_classes, loss={'xent'}, **kwargs):
+    def __init__(self, num_classes, loss={'xent'}, use_contraloss=False, **kwargs):
         super(MUB, self).__init__()
+        self.use_contraloss = use_contraloss
         self.loss = loss
         self.resnet50 = torchvision.models.resnet50(pretrained=True)
         self.base = nn.Sequential(*list(self.resnet50.children())[:-2])
         self.classifier = nn.Linear(2048, num_classes)
         self.part = 6 # the numbers of parts
+        self.scale = 30
         self.avgpool = nn.AdaptiveAvgPool2d((self.part, 1))
         self.dropout = nn.Dropout(p=0.5)
         # remove the final downsample
@@ -202,6 +204,8 @@ class MUB(nn.Module):
         # global feature
         x_g = F.avg_pool2d(x, x.size()[2:])
         f_g = x_g.view(x.size(0), -1)
+        #f_g = f_g/torch.norm(f_g, 2, 1, keepdim=True)
+        #f_g = f_g * self.scale
         y_g = self.classifier(f_g)
 
         # cropped feature
@@ -216,10 +220,13 @@ class MUB(nn.Module):
         x_cp = x[:,:,start_h:start_h + cp_h, start_w:start_w+cp_w]
         x_cp = F.avg_pool2d(x_cp, x_cp.size()[2:])
         f_cp = x_cp.view(x_cp.size(0), -1)
+        #f_cp = f_cp/torch.norm(f_cp, 2, 1, keepdim=True)
+        #f_cp = f_cp * self.scale
         y_cp = self.classifier(f_cp)
 
         # part feature
         x_p = self.avgpool(x)
+        #x_p=x_p/torch.norm(x_p,2,1,keepdim=True) * self.scale
         if not self.training:
             return f_g, f_cp, x_p
         x_p = self.dropout(x_p)
@@ -240,7 +247,10 @@ class MUB(nn.Module):
         for i in range(self.part):
             y_p.append(predict[i])
         if self.loss == {'xent'}:
-            return y_g, y_cp, y_p
+            if self.use_contraloss:
+                return y_g, y_cp, y_p, f_g, f_cp
+            else:
+                return y_g, y_cp, y_p
         elif self.loss == {'xent', 'htri'}:
             return y_g, f_g, y_cp, f_cp, y_p, x_p
         else:
